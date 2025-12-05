@@ -1,0 +1,48 @@
+{
+  "name": "Baltistan Book Depot API",
+  "env": {
+    "Local": {
+      "base_url": "http://localhost:5000"
+    },
+    "Production": {
+      "base_url": "https://your-live-server.com"
+    }
+  },
+  "requests": [
+    {
+      "name": "Dashboard Metrics",
+      "method": "GET",
+      "url": "{{base_url}}/api/dashboard"
+    },
+    {
+      "name": "Get All Products",
+      "method": "GET",
+      "url": "{{base_url}}/api/products"
+    },
+    {
+      "name": "Get All Creditors",
+      "method": "GET",
+      "url": "{{base_url}}/api/creditors"
+    },
+    {
+      "name": "Get All Suppliers",
+      "method": "GET",
+      "url": "{{base_url}}/api/suppliers"
+    },
+    {
+      "name": "Get Sales History",
+      "method": "GET",
+      "url": "{{base_url}}/api/sales"
+    },
+    {
+      "name": "Add New Product",
+      "method": "POST",
+      "url": "{{base_url}}/api/products",
+      "body": {
+        "mode": "raw",
+        "raw": "{\n  \"name\": \"Test Book\",\n  \"sku\": \"TEST-001\",\n  \"price\": 999,\n  \"category\": \"Test\",\n  \"quantity\": 50\n}",
+        "options": { "raw": { "language": "json" } }
+      }
+    }
+  ]
+}
