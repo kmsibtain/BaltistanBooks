@@ -66,4 +66,15 @@ const recordPayment = async (req, res) => {
   }
 };
 
-module.exports = { getAllCreditors, addCreditor, recordPayment };
+const getCreditorById = async (req, res) => {
+  try {
+    const doc = await db.collection('creditors').doc(req.params.id).get();
+    if (!doc.exists) return res.status(404).json({ error: 'Not found' });
+    res.json({ id: doc.id, ...doc.data() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+
+module.exports = { getAllCreditors, addCreditor, recordPayment, getCreditorById };

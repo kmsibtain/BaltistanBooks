@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+// src/pages/SalesHistory.tsx
+import { useState, useEffect, useMemo } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,36 +13,109 @@ import {
 } from '@/components/ui/select';
 import { DataTable } from '@/components/ui/DataTable';
 import { ExportButton } from '@/components/ExportButton';
-import { mockSales, mockCreditors, formatCurrency, formatDate, Sale } from '@/lib/mockData';
-import { formatSalesForExport } from '@/lib/exportUtils';
-import { Search, Calendar, Filter, X } from 'lucide-react';
+import { Calendar, Filter, X } from 'lucide-react';
+import { toast } from 'sonner';
+
+// Types
+interface SaleItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+}
+
+interface Sale {
+  id: string;
+  date: string;
+  items: SaleItem[];
+  total: number;
+  paymentType: 'cash' | 'credit';
+  creditorId?: string | null;
+}
+
+interface Creditor {
+  id: string;
+  name: string;
+}
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const SalesHistory = () => {
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [creditors, setCreditors] = useState<Creditor[]>([]);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [paymentTypeFilter, setPaymentTypeFilter] = useState<string>('all');
   const [creditorFilter, setCreditorFilter] = useState<string>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
+  // Format helpers
+  const formatCurrency = (amount: number): string => {
+    return new Intl.NumberFormat('en-PK', {
+      style: 'currency',
+      currency: 'PKR',
+      minimumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const formatDate = (dateString: string): string => {
+    return new Date(dateString).toLocaleDateString('en-PK', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  // Fetch sales & creditors
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [salesRes, creditorsRes] = await Promise.all([
+          fetch(`${API_URL}/sales`),
+          fetch(`${API_URL}/creditors`),
+        ]);
+
+        if (!salesRes.ok) throw new Error('Failed to load sales');
+        if (!creditorsRes.ok) throw new Error('Failed to load creditors');
+
+        const salesData: Sale[] = await salesRes.json();
+        const creditorsData: Creditor[] = await creditorsRes.json();
+
+        // Sort newest first
+        salesData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        setSales(salesData);
+        setCreditors(creditorsData);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to load data';
+        setError(msg);
+        toast.error(msg);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Filter sales
   const filteredSales = useMemo(() => {
-    return mockSales.filter((sale) => {
-      // Date filter
+    return sales.filter((sale) => {
       if (startDate && sale.date < startDate) return false;
       if (endDate && sale.date > endDate) return false;
-      
-      // Payment type filter
       if (paymentTypeFilter !== 'all' && sale.paymentType !== paymentTypeFilter) return false;
-      
-      // Creditor filter
       if (creditorFilter !== 'all') {
         if (creditorFilter === 'cash' && sale.paymentType !== 'cash') return false;
         if (creditorFilter !== 'cash' && sale.creditorId !== creditorFilter) return false;
       }
-      
       return true;
     });
-  }, [startDate, endDate, paymentTypeFilter, creditorFilter]);
+  }, [sales, startDate, endDate, paymentTypeFilter, creditorFilter]);
 
-  const totalFiltered = filteredSales.reduce((sum, sale) => sum + sale.total, 0);
+  const totalFiltered = filteredSales.reduce((sum, s) => sum + s.total, 0);
 
   const clearFilters = () => {
     setStartDate('');
@@ -50,11 +124,12 @@ const SalesHistory = () => {
     setCreditorFilter('all');
   };
 
-  const hasActiveFilters = startDate || endDate || paymentTypeFilter !== 'all' || creditorFilter !== 'all';
+  const hasActiveFilters =
+    startDate || endDate || paymentTypeFilter !== 'all' || creditorFilter !== 'all';
 
-  const getCreditorName = (creditorId?: string) => {
-    if (!creditorId) return 'N/A';
-    const creditor = mockCreditors.find(c => c.id === creditorId);
+  const getCreditorName = (creditorId?: string | null) => {
+    if (!creditorId) return '—';
+    const creditor = creditors.find((c) => c.id === creditorId);
     return creditor?.name || 'Unknown';
   };
 
@@ -80,7 +155,7 @@ const SalesHistory = () => {
         <div>
           <span className="font-medium">{item.items.length} item(s)</span>
           <p className="text-xs text-muted-foreground truncate max-w-[200px]">
-            {item.items.map(i => i.productName).join(', ')}
+            {item.items.map((i) => i.productName).join(', ')}
           </p>
         </div>
       ),
@@ -96,24 +171,49 @@ const SalesHistory = () => {
     {
       header: 'Payment Type',
       accessor: (item: Sale) => (
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-          item.paymentType === 'cash' 
-            ? 'bg-success/10 text-success' 
-            : 'bg-accent/10 text-accent'
-        }`}>
+        <span
+          className={`px-2 py-1 rounded-full text-xs font-medium ${
+            item.paymentType === 'cash'
+              ? 'bg-success/10 text-success'
+              : 'bg-accent/10 text-accent'
+          }`}
+        >
           {item.paymentType === 'cash' ? 'Cash' : 'Credit'}
         </span>
       ),
     },
     {
-      header: 'Creditor',
+      header: 'Customer',
       accessor: (item: Sale) => (
         <span className={item.creditorId ? 'font-medium' : 'text-muted-foreground'}>
-          {item.paymentType === 'credit' ? getCreditorName(item.creditorId) : '-'}
+          {item.paymentType === 'credit' ? getCreditorName(item.creditorId) : 'Cash Sale'}
         </span>
       ),
     },
   ];
+
+  // Loading state
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center min-h-screen">
+          <p className="text-xl text-muted-foreground">Loading sales history...</p>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <AppLayout>
+        <div className="text-center py-12">
+          <p className="text-destructive text-lg mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
@@ -123,9 +223,16 @@ const SalesHistory = () => {
             <h1 className="page-title">Sales History</h1>
             <p className="page-subtitle">View and filter all past transactions</p>
           </div>
-          <ExportButton 
-            data={formatSalesForExport(filteredSales)} 
-            filename="sales-history" 
+          <ExportButton
+            data={filteredSales.map((s) => ({
+              Date: formatDate(s.date),
+              'Sale ID': s.id,
+              Items: s.items.map((i) => i.productName).join('; '),
+              Total: s.total,
+              'Payment Type': s.paymentType,
+              Customer: s.paymentType === 'credit' ? getCreditorName(s.creditorId) : 'Cash',
+            }))}
+            filename="sales-history"
           />
         </div>
       </div>
@@ -142,26 +249,18 @@ const SalesHistory = () => {
             </Button>
           )}
         </div>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
-            <Label className="input-label">Start Date</Label>
-            <Input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
+            <Label>Start Date</Label>
+            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           </div>
           <div>
-            <Label className="input-label">End Date</Label>
-            <Input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
+            <Label>End Date</Label>
+            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
           </div>
           <div>
-            <Label className="input-label">Payment Type</Label>
+            <Label>Payment Type</Label>
             <Select value={paymentTypeFilter} onValueChange={setPaymentTypeFilter}>
               <SelectTrigger>
                 <SelectValue />
@@ -174,17 +273,17 @@ const SalesHistory = () => {
             </Select>
           </div>
           <div>
-            <Label className="input-label">Creditor</Label>
+            <Label>Customer</Label>
             <Select value={creditorFilter} onValueChange={setCreditorFilter}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="all">All Customers</SelectItem>
                 <SelectItem value="cash">Cash Sales Only</SelectItem>
-                {mockCreditors.map((creditor) => (
-                  <SelectItem key={creditor.id} value={creditor.id}>
-                    {creditor.name}
+                {creditors.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -200,11 +299,11 @@ const SalesHistory = () => {
           {formatCurrency(totalFiltered)}
         </p>
         <p className="text-sm text-muted-foreground mt-1">
-          {filteredSales.length} transaction(s)
+          {filteredSales.length} transaction{filteredSales.length !== 1 ? 's' : ''}
         </p>
       </div>
 
-      {/* Sales Table */}
+      {/* Table */}
       <DataTable
         columns={saleColumns}
         data={filteredSales}

@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+// src/pages/SuppliersReports.tsx
+import { useState, useEffect, useMemo } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,31 +11,46 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { DataTable } from '@/components/ui/DataTable';
-import { mockSuppliers, mockSales, formatCurrency, formatDate, Supplier } from '@/lib/mockData';
-import { formatSuppliersForExport, formatSalesForExport } from '@/lib/exportUtils';
 import { ExportButton } from '@/components/ExportButton';
-import { DollarSign, Truck, TrendingUp, TrendingDown, Calendar, Plus, Search, Pencil } from 'lucide-react';
+import {
+  DollarSign,
+  Truck,
+  Calendar,
+  Plus,
+  Search,
+  Pencil,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
+// Types
+interface Supplier {
+  id: string;
+  name: string;
+  phone: string;
+  address?: string;
+  email?: string;
+  notes?: string;
+  amountOwed: number;
+  lastPaymentDate?: string | null;
+  createdAt: string;
+}
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
 const SuppliersReports = () => {
-  const [suppliers, setSuppliers] = useState<Supplier[]>(mockSuppliers);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [filteredSuppliers, setFilteredSuppliers] = useState<Supplier[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [reportPeriod, setReportPeriod] = useState('monthly');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
 
   const [newSupplier, setNewSupplier] = useState({
     name: '',
@@ -45,26 +61,159 @@ const SuppliersReports = () => {
     amountOwed: '',
   });
 
-  const [editSupplier, setEditSupplier] = useState({
-    id: '',
-    name: '',
-    phone: '',
-    address: '',
-    email: '',
-    notes: '',
-    amountOwed: '',
-  });
+  const [editSupplier, setEditSupplier] = useState<Supplier | null>(null);
 
-  const filteredSuppliers = useMemo(() => {
-    if (!searchQuery.trim()) return suppliers;
-    return suppliers.filter(s => 
-      s.name.toLowerCase().includes(searchQuery.toLowerCase())
+  // Format helpers
+  const formatCurrency = (amount: number): string => {
+    return new Intl.NumberFormat('en-PK', {
+      style: 'currency',
+      currency: 'PKR',
+      minimumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const formatDate = (dateString: string | null | undefined): string => {
+    if (!dateString) return '—';
+    return new Date(dateString).toLocaleDateString('en-PK', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  // Fetch suppliers
+  useEffect(() => {
+    const fetchSuppliers = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`${API_URL}/suppliers`);
+        if (!res.ok) throw new Error('Failed to load suppliers');
+        const data: Supplier[] = await res.json();
+        setSuppliers(data);
+        setFilteredSuppliers(data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Network error';
+        setError(msg);
+        toast.error('Could not load suppliers');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSuppliers();
+  }, []);
+
+  // Search
+  useEffect(() => {
+    const filtered = suppliers.filter((s) =>
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.phone.includes(searchQuery)
     );
-  }, [suppliers, searchQuery]);
+    setFilteredSuppliers(filtered);
+  }, [searchQuery, suppliers]);
 
   const totalOwed = suppliers.reduce((sum, s) => sum + s.amountOwed, 0);
 
-  const supplierColumns = [
+  // Add supplier
+  const handleAddSupplier = async () => {
+    if (!newSupplier.name.trim() || !newSupplier.phone.trim()) {
+      toast.error('Name and phone are required');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/suppliers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newSupplier.name.trim(),
+          phone: newSupplier.phone.trim(),
+          address: newSupplier.address.trim() || null,
+          email: newSupplier.email.trim() || null,
+          notes: newSupplier.notes.trim() || null,
+          amountOwed: Number(newSupplier.amountOwed) || 0,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Failed to add supplier');
+
+      const added: Supplier = await res.json();
+      setSuppliers([added, ...suppliers]);
+      toast.success(`"${added.name}" added successfully`);
+      setIsAddDialogOpen(false);
+      setNewSupplier({ name: '', phone: '', address: '', email: '', notes: '', amountOwed: '' });
+    } catch {
+      toast.error('Failed to add supplier');
+    }
+  };
+
+  // Edit supplier
+  const handleEditClick = (supplier: Supplier) => {
+    setEditSupplier(supplier);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateSupplier = async () => {
+    if (!editSupplier || !editSupplier.name.trim() || !editSupplier.phone.trim()) {
+      toast.error('Name and phone required');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/suppliers/${editSupplier.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editSupplier.name,
+          phone: editSupplier.phone,
+          address: editSupplier.address || null,
+          email: editSupplier.email || null,
+          notes: editSupplier.notes || null,
+          amountOwed: Number(editSupplier.amountOwed),
+        }),
+      });
+
+      if (!res.ok) throw new Error('Update failed');
+
+      const updated = await res.json();
+      setSuppliers(suppliers.map(s => s.id === updated.id ? updated : s));
+      toast.success('Supplier updated');
+      setIsEditDialogOpen(false);
+    } catch {
+      toast.error('Failed to update supplier');
+    }
+  };
+
+  // Record payment
+  const handleRecordPayment = async () => {
+    const amount = parseFloat(paymentAmount);
+    if (!amount || amount <= 0) {
+      toast.error('Enter valid amount');
+      return;
+    }
+    if (!selectedSupplier) return;
+
+    try {
+      const res = await fetch(`${API_URL}/suppliers/${selectedSupplier.id}/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+
+      if (!res.ok) throw new Error('Payment failed');
+
+      const updated = await res.json();
+      setSuppliers(suppliers.map(s => s.id === updated.id ? updated : s));
+      toast.success(`Payment recorded: ${formatCurrency(amount)}`);
+      setIsPaymentDialogOpen(false);
+      setPaymentAmount('');
+      setSelectedSupplier(null);
+    } catch {
+      toast.error('Payment failed');
+    }
+  };
+
+  const columns = [
     {
       header: 'Supplier',
       accessor: (item: Supplier) => (
@@ -74,7 +223,7 @@ const SuppliersReports = () => {
           </div>
           <div>
             <p className="font-medium">{item.name}</p>
-            <p className="text-sm text-muted-foreground">{item.phone || item.contact}</p>
+            <p className="text-sm text-muted-foreground">{item.phone}</p>
           </div>
         </div>
       ),
@@ -130,139 +279,48 @@ const SuppliersReports = () => {
           >
             <DollarSign className="w-4 h-4 mr-1" />
             Pay
+Pay
           </Button>
         </div>
       ),
     },
   ];
 
-  const handleEditClick = (supplier: Supplier) => {
-    setEditSupplier({
-      id: supplier.id,
-      name: supplier.name,
-      phone: supplier.phone || supplier.contact || '',
-      address: supplier.address || '',
-      email: supplier.email || '',
-      notes: supplier.notes || '',
-      amountOwed: supplier.amountOwed.toString(),
-    });
-    setIsEditDialogOpen(true);
-  };
+  // Loading
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center min-h-screen">
+          <p className="text-xl text-muted-foreground">Loading suppliers...</p>
+        </div>
+      </AppLayout>
+    );
+  }
 
-  const handleAddSupplier = () => {
-    if (!newSupplier.name.trim()) {
-      toast.error('Supplier name is required');
-      return;
-    }
-    if (!newSupplier.phone.trim()) {
-      toast.error('Phone number is required');
-      return;
-    }
-
-    const supplier: Supplier = {
-      id: `sup-${Date.now()}`,
-      name: newSupplier.name.trim(),
-      contact: newSupplier.phone.trim(),
-      phone: newSupplier.phone.trim(),
-      address: newSupplier.address.trim() || undefined,
-      email: newSupplier.email.trim() || undefined,
-      notes: newSupplier.notes.trim() || undefined,
-      amountOwed: parseFloat(newSupplier.amountOwed) || 0,
-      lastPaymentDate: null,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-
-    setSuppliers([supplier, ...suppliers]);
-    mockSuppliers.unshift(supplier);
-    toast.success(`Supplier "${supplier.name}" added successfully`);
-    setIsAddDialogOpen(false);
-    setNewSupplier({ name: '', phone: '', address: '', email: '', notes: '', amountOwed: '' });
-  };
-
-  const handleEditSupplier = () => {
-    if (!editSupplier.name.trim()) {
-      toast.error('Supplier name is required');
-      return;
-    }
-    if (!editSupplier.phone.trim()) {
-      toast.error('Phone number is required');
-      return;
-    }
-
-    const updatedSuppliers = suppliers.map(s => {
-      if (s.id === editSupplier.id) {
-        return {
-          ...s,
-          name: editSupplier.name.trim(),
-          contact: editSupplier.phone.trim(),
-          phone: editSupplier.phone.trim(),
-          address: editSupplier.address.trim() || undefined,
-          email: editSupplier.email.trim() || undefined,
-          notes: editSupplier.notes.trim() || undefined,
-          amountOwed: parseFloat(editSupplier.amountOwed) || 0,
-        };
-      }
-      return s;
-    });
-
-    setSuppliers(updatedSuppliers);
-    
-    // Update mockSuppliers as well
-    const index = mockSuppliers.findIndex(s => s.id === editSupplier.id);
-    if (index !== -1) {
-      mockSuppliers[index] = updatedSuppliers.find(s => s.id === editSupplier.id)!;
-    }
-
-    toast.success(`Supplier "${editSupplier.name}" updated successfully`);
-    setIsEditDialogOpen(false);
-  };
-
-  const handleRecordPayment = () => {
-    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
-      toast.error('Please enter a valid payment amount');
-      return;
-    }
-
-    const updatedSuppliers = suppliers.map(s => {
-      if (s.id === selectedSupplier?.id) {
-        return {
-          ...s,
-          amountOwed: Math.max(0, s.amountOwed - parseFloat(paymentAmount)),
-          lastPaymentDate: new Date().toISOString().split('T')[0],
-        };
-      }
-      return s;
-    });
-
-    setSuppliers(updatedSuppliers);
-    toast.success(`Payment of ${formatCurrency(parseFloat(paymentAmount))} recorded to ${selectedSupplier?.name}`);
-    setIsPaymentDialogOpen(false);
-    setPaymentAmount('');
-    setSelectedSupplier(null);
-  };
-
-  // Mock financial report data
-  const generateReport = () => {
-    const revenue = 485000;
-    const cogs = 312000;
-    const profit = revenue - cogs;
-    return { revenue, cogs, profit };
-  };
-
-  const report = generateReport();
+  // Error
+  if (error) {
+    return (
+      <AppLayout>
+        <div className="text-center py-12">
+          <p className="text-destructive text-lg mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
       <div className="page-header">
         <h1 className="page-title">Suppliers & Reports</h1>
-        <p className="page-subtitle">Manage supplier debts and view financial reports</p>
+        <p className="page-subtitle">Manage supplier debts and track payments</p>
       </div>
 
-      {/* Supplier Debts Section */}
+      {/* Supplier List */}
       <div className="mb-12">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+        <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6">
           <h2 className="font-display font-semibold text-xl">Supplier Debts</h2>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -276,278 +334,99 @@ const SuppliersReports = () => {
               <Plus className="w-4 h-4 mr-2" />
               Add Supplier
             </Button>
-            <ExportButton 
-              data={formatSuppliersForExport(filteredSuppliers)} 
-              filename="supplier-debts" 
+            <ExportButton
+              data={filteredSuppliers.map(s => ({
+                Name: s.name,
+                Phone: s.phone,
+                Email: s.email || '',
+                'Amount Owed': s.amountOwed,
+                'Last Payment': s.lastPaymentDate || '—',
+              }))}
+              filename="suppliers-report"
             />
           </div>
         </div>
-        
-        {/* Total Summary */}
+
+        {/* Total Owed */}
         <div className="metric-card mb-6 max-w-md before:bg-accent">
           <p className="text-sm text-muted-foreground">Total Owed to Suppliers</p>
           <p className="text-3xl font-bold font-display mt-2 text-accent">
             {formatCurrency(totalOwed)}
           </p>
           <p className="text-sm text-muted-foreground mt-1">
-            across {suppliers.length} suppliers
+            across {suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''}
           </p>
         </div>
 
         <DataTable
-          columns={supplierColumns}
+          columns={columns}
           data={filteredSuppliers}
-          emptyMessage={searchQuery ? "No suppliers found matching your search" : "No suppliers found"}
+          emptyMessage="No suppliers found"
         />
-      </div>
-
-      {/* Financial Reports Section */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display font-semibold text-xl flex items-center gap-2">
-            <Calendar className="w-5 h-5" />
-            Financial Reports
-          </h2>
-          <ExportButton 
-            data={formatSalesForExport(mockSales)} 
-            filename="sales-report" 
-          />
-        </div>
-
-        {/* Date Range Selector */}
-        <div className="bg-card rounded-xl border border-border p-6 mb-6">
-          <Label className="input-label">Report Period</Label>
-          <div className="flex flex-wrap gap-4 items-end">
-            <Select value={reportPeriod} onValueChange={setReportPeriod}>
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="monthly">This Month</SelectItem>
-                <SelectItem value="yearly">This Year</SelectItem>
-                <SelectItem value="custom">Custom Range</SelectItem>
-              </SelectContent>
-            </Select>
-            {reportPeriod === 'custom' && (
-              <div className="flex gap-4 animate-fade-in">
-                <div>
-                  <Label className="text-xs text-muted-foreground">Start Date</Label>
-                  <Input
-                    type="date"
-                    value={customStartDate}
-                    onChange={(e) => setCustomStartDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">End Date</Label>
-                  <Input
-                    type="date"
-                    value={customEndDate}
-                    onChange={(e) => setCustomEndDate(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Report Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="metric-card before:bg-success">
-            <div className="flex items-center gap-2 mb-2">
-              <TrendingUp className="w-5 h-5 text-success" />
-              <p className="text-sm text-muted-foreground">Total Revenue</p>
-            </div>
-            <p className="text-3xl font-bold font-display text-success">
-              {formatCurrency(report.revenue)}
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {reportPeriod === 'monthly' ? 'this month' : reportPeriod === 'yearly' ? 'this year' : 'selected period'}
-            </p>
-          </div>
-
-          <div className="metric-card before:bg-destructive">
-            <div className="flex items-center gap-2 mb-2">
-              <TrendingDown className="w-5 h-5 text-destructive" />
-              <p className="text-sm text-muted-foreground">Cost of Goods Sold</p>
-            </div>
-            <p className="text-3xl font-bold font-display">
-              {formatCurrency(report.cogs)}
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {((report.cogs / report.revenue) * 100).toFixed(1)}% of revenue
-            </p>
-          </div>
-
-          <div className={`metric-card ${report.profit >= 0 ? 'before:bg-primary' : 'before:bg-destructive'}`}>
-            <div className="flex items-center gap-2 mb-2">
-              <DollarSign className={`w-5 h-5 ${report.profit >= 0 ? 'text-primary' : 'text-destructive'}`} />
-              <p className="text-sm text-muted-foreground">Net Profit</p>
-            </div>
-            <p className={`text-3xl font-bold font-display ${report.profit >= 0 ? 'text-primary' : 'text-destructive'}`}>
-              {formatCurrency(report.profit)}
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {((report.profit / report.revenue) * 100).toFixed(1)}% margin
-            </p>
-          </div>
-        </div>
       </div>
 
       {/* Add Supplier Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-display">Add New Supplier</DialogTitle>
+            <DialogTitle>Add New Supplier</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div>
-              <Label className="input-label">Supplier Name *</Label>
-              <Input
-                value={newSupplier.name}
-                onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })}
-                placeholder="Enter supplier name"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Phone Number *</Label>
-              <Input
-                value={newSupplier.phone}
-                onChange={(e) => setNewSupplier({ ...newSupplier, phone: e.target.value })}
-                placeholder="+92 XXX XXXXXXX"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Email</Label>
-              <Input
-                type="email"
-                value={newSupplier.email}
-                onChange={(e) => setNewSupplier({ ...newSupplier, email: e.target.value })}
-                placeholder="supplier@email.com"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Address</Label>
-              <Input
-                value={newSupplier.address}
-                onChange={(e) => setNewSupplier({ ...newSupplier, address: e.target.value })}
-                placeholder="Enter address"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Initial Amount Owed (PKR)</Label>
-              <Input
-                type="number"
-                value={newSupplier.amountOwed}
-                onChange={(e) => setNewSupplier({ ...newSupplier, amountOwed: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Notes</Label>
-              <Textarea
-                value={newSupplier.notes}
-                onChange={(e) => setNewSupplier({ ...newSupplier, notes: e.target.value })}
-                placeholder="Additional notes..."
-                rows={2}
-              />
-            </div>
-            <Button className="w-full" onClick={handleAddSupplier}>
-              Add Supplier
-            </Button>
+          <div className="space-y-4 py-4">
+            <div><Label>Name *</Label><Input value={newSupplier.name} onChange={e => setNewSupplier({...newSupplier, name: e.target.value})} /></div>
+            <div><Label>Phone *</Label><Input value={newSupplier.phone} onChange={e => setNewSupplier({...newSupplier, phone: e.target.value})} /></div>
+            <div><Label>Email</Label><Input value={newSupplier.email} onChange={e => setNewSupplier({...newSupplier, email: e.target.value})} /></div>
+            <div><Label>Address</Label><Input value={newSupplier.address} onChange={e => setNewSupplier({...newSupplier, address: e.target.value})} /></div>
+            <div><Label>Initial Amount Owed</Label><Input type="number" value={newSupplier.amountOwed} onChange={e => setNewSupplier({...newSupplier, amountOwed: e.target.value})} placeholder="0" /></div>
+            <div><Label>Notes</Label><Textarea value={newSupplier.notes} onChange={e => setNewSupplier({...newSupplier, notes: e.target.value})} /></div>
+            <Button className="w-full" onClick={handleAddSupplier}>Add Supplier</Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Edit Supplier Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-display">Edit Supplier</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div>
-              <Label className="input-label">Supplier Name *</Label>
-              <Input
-                value={editSupplier.name}
-                onChange={(e) => setEditSupplier({ ...editSupplier, name: e.target.value })}
-                placeholder="Enter supplier name"
-              />
+      {/* Edit Dialog */}
+      {editSupplier && (
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Edit Supplier</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div><Label>Name *</Label><Input value={editSupplier.name} onChange={e => setEditSupplier({...editSupplier, name: e.target.value})} /></div>
+              <div><Label>Phone *</Label><Input value={editSupplier.phone} onChange={e => setEditSupplier({...editSupplier, phone: e.target.value})} /></div>
+              <div><Label>Email</Label><Input value={editSupplier.email} onChange={e => setEditSupplier({...editSupplier, email: e.target.value})} /></div>
+              <div><Label>Address</Label><Input value={editSupplier.address} onChange={e => setEditSupplier({...editSupplier, address: e.target.value})} /></div>
+              <div><Label>Amount Owed</Label><Input type="number" value={editSupplier.amountOwed} onChange={e => setEditSupplier({...editSupplier, amountOwed: Number(e.target.value)})} /></div>
+              <div><Label>Notes</Label><Textarea value={editSupplier.notes} onChange={e => setEditSupplier({...editSupplier, notes: e.target.value})} /></div>
+              <Button className="w-full" onClick={handleUpdateSupplier}>Save Changes</Button>
             </div>
-            <div>
-              <Label className="input-label">Phone Number *</Label>
-              <Input
-                value={editSupplier.phone}
-                onChange={(e) => setEditSupplier({ ...editSupplier, phone: e.target.value })}
-                placeholder="+92 XXX XXXXXXX"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Email</Label>
-              <Input
-                type="email"
-                value={editSupplier.email}
-                onChange={(e) => setEditSupplier({ ...editSupplier, email: e.target.value })}
-                placeholder="supplier@email.com"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Address</Label>
-              <Input
-                value={editSupplier.address}
-                onChange={(e) => setEditSupplier({ ...editSupplier, address: e.target.value })}
-                placeholder="Enter address"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Amount Owed (PKR)</Label>
-              <Input
-                type="number"
-                value={editSupplier.amountOwed}
-                onChange={(e) => setEditSupplier({ ...editSupplier, amountOwed: e.target.value })}
-                placeholder="0"
-              />
-            </div>
-            <div>
-              <Label className="input-label">Notes</Label>
-              <Textarea
-                value={editSupplier.notes}
-                onChange={(e) => setEditSupplier({ ...editSupplier, notes: e.target.value })}
-                placeholder="Additional notes..."
-                rows={2}
-              />
-            </div>
-            <Button className="w-full" onClick={handleEditSupplier}>
-              Save Changes
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Payment Dialog */}
       <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="font-display">Record Payment to Supplier</DialogTitle>
+            <DialogTitle>Record Payment</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-4">
+          <div className="space-y-4 py-4">
             <div>
-              <Label className="input-label">Supplier</Label>
+              <Label>Supplier</Label>
               <p className="font-semibold">{selectedSupplier?.name}</p>
             </div>
             <div>
-              <Label className="input-label">Current Balance Owed</Label>
-              <p className="text-2xl font-bold font-display text-accent">
+              <Label>Current Balance</Label>
+              <p className="text-2xl font-bold text-accent">
                 {formatCurrency(selectedSupplier?.amountOwed || 0)}
               </p>
             </div>
             <div>
-              <Label className="input-label">Payment Amount (PKR)</Label>
+              <Label>Payment Amount</Label>
               <Input
                 type="number"
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
-                placeholder="Enter payment amount"
+                placeholder="0"
               />
             </div>
             <Button className="w-full" onClick={handleRecordPayment}>

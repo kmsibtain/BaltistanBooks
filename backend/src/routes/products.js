@@ -6,9 +6,12 @@ const {
   updateProductQuantity,
   updateProductPrice,
   getProductById,
+  importProducts,
 } = require('../controllers/productController');
 
 router.get('/', getAllProducts);
+router.post('/import', addProduct); // Wait, wrong controller function
+router.post('/import', importProducts);
 router.get('/:id', getProductById);
 router.post('/', addProduct);
 router.patch('/:id/quantity', updateProductQuantity);

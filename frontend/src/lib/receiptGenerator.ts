@@ -1,259 +1,226 @@
+// src/lib/receiptGenerator.ts
 import jsPDF from 'jspdf';
-import { Sale, formatCurrency, formatDate, mockCreditors } from './mockData';
+
+// Proper types — no any, no mock data!
+export interface SaleItem {
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+}
+
+export interface SaleForReceipt {
+  id: string;
+  date: string;
+  items: SaleItem[];
+  total: number;
+  paymentType: 'cash' | 'credit';
+  creditorId?: string | null;
+  creditorName?: string; // optional: pass name directly to avoid lookup
+}
 
 interface ReceiptOptions {
-  sale: Sale;
+  sale: SaleForReceipt;
   invoiceNumber?: string;
 }
 
+// Helper: format currency
+const formatCurrency = (amount: number): string => {
+  return new Intl.NumberFormat('en-PK', {
+    style: 'currency',
+    currency: 'PKR',
+    minimumFractionDigits: 0,
+  }).format(amount);
+};
+
+// Helper: format date
+const formatDate = (dateString: string): string => {
+  return new Date(dateString).toLocaleDateString('en-PK', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+};
+
+// Thermal Receipt (80mm)
 export const generateReceipt = ({ sale, invoiceNumber }: ReceiptOptions) => {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
-    format: [80, 200], // Receipt paper size
+    format: [80, 200 + sale.items.length * 10], // dynamic height
   });
 
   const pageWidth = 80;
   const margin = 5;
-  const contentWidth = pageWidth - (margin * 2);
   let y = 10;
 
-  // Helper functions
-  const centerText = (text: string, yPos: number, fontSize = 10) => {
+  const center = (text: string, fontSize = 10) => {
     doc.setFontSize(fontSize);
-    const textWidth = doc.getTextWidth(text);
-    doc.text(text, (pageWidth - textWidth) / 2, yPos);
+    const w = doc.getTextWidth(text);
+    doc.text(text, (pageWidth - w) / 2, y);
+    y += fontSize < 12 ? 5 : 7;
   };
 
-  const leftText = (text: string, yPos: number) => {
-    doc.text(text, margin, yPos);
+  const left = (text: string) => doc.text(text, margin, y += 5);
+  const right = (text: string) => {
+    const w = doc.getTextWidth(text);
+    doc.text(text, pageWidth - margin - w, y);
   };
-
-  const rightText = (text: string, yPos: number) => {
-    const textWidth = doc.getTextWidth(text);
-    doc.text(text, pageWidth - margin - textWidth, yPos);
-  };
-
-  const drawLine = (yPos: number) => {
+  const line = () => {
     doc.setDrawColor(200);
-    doc.line(margin, yPos, pageWidth - margin, yPos);
+    doc.line(margin, y += 3, pageWidth - margin, y);
+    y += 4;
   };
 
-  // Header - Store Name
+  // Header
   doc.setFont('helvetica', 'bold');
-  centerText('BALTISTAN BOOK DEPOT', y, 12);
-  y += 5;
-
+  center('BALTISTAN BOOK DEPOT', 14);
   doc.setFont('helvetica', 'normal');
-  centerText('Quality Books & Stationery', y, 8);
-  y += 4;
-  centerText('Skardu, Gilgit-Baltistan', y, 8);
-  y += 4;
-  centerText('Phone: +92 XXX XXXXXXX', y, 8);
-  y += 6;
+  center('Quality Books & Stationery', 9);
+  center('Skardu, Gilgit-Baltistan', 9);
+  center('Phone: +92 3XX XXXXXXX', 9);
+  line();
 
-  drawLine(y);
-  y += 4;
-
-  // Invoice details
-  doc.setFontSize(9);
+  // Invoice info
   const invNum = invoiceNumber || `INV-${Date.now().toString().slice(-8)}`;
-  leftText(`Invoice: ${invNum}`, y);
-  y += 4;
-  leftText(`Date: ${formatDate(sale.date)}`, y);
-  y += 4;
-  leftText(`Time: ${new Date().toLocaleTimeString('en-PK')}`, y);
-  y += 4;
-
-  // Payment type and creditor info
-  leftText(`Payment: ${sale.paymentType === 'cash' ? 'CASH' : 'CREDIT'}`, y);
-  y += 4;
-
-  if (sale.paymentType === 'credit' && sale.creditorId) {
-    const creditor = mockCreditors.find(c => c.id === sale.creditorId);
-    if (creditor) {
-      leftText(`Customer: ${creditor.name}`, y);
-      y += 4;
-    }
-  }
-
-  y += 2;
-  drawLine(y);
-  y += 4;
+  doc.setFontSize(9);
+  left(`Invoice: ${invNum}`);
+  left(`Date: ${formatDate(sale.date)}`);
+  left(`Time: ${new Date().toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}`);
+  left(`Payment: ${sale.paymentType.toUpperCase()}`);
+  
+  if (sale.paymentType === 'credit' && sale.creditorName) {
+    left(`Customer: ${sale.creditorName}`);}
+  else if (sale.paymentType === 'credit')                          left('Customer: Credit Sale');
+  
+  line();
 
   // Items header
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  leftText('ITEM', y);
-  rightText('AMOUNT', y);
-  y += 4;
-  drawLine(y);
-  y += 4;
+  doc.setFontSize(9);
+  left('ITEM');
+  right('AMOUNT');
+  y -= 5;
+  line();
 
   // Items
   doc.setFont('helvetica', 'normal');
   sale.items.forEach(item => {
-    // Product name (may wrap)
-    const nameLines = doc.splitTextToSize(item.productName, contentWidth - 20);
-    nameLines.forEach((line: string) => {
-      leftText(line, y);
-      y += 4;
+    const lines = doc.splitTextToSize(item.productName, 50);
+    lines.forEach((line: string, i: number) => {
+      if (i === 0) left(line);
+      else         left('  ' + line);
     });
-    
-    // Quantity x Price = Total
-    leftText(`  ${item.quantity} x ${formatCurrency(item.unitPrice)}`, y);
-    rightText(formatCurrency(item.total), y);
-    y += 5;
+    left(`  ${item.quantity} × ${formatCurrency(item.unitPrice)}`);
+    right(formatCurrency(item.total));
+    y += 2;
   });
 
-  y += 2;
-  drawLine(y);
-  y += 4;
+  line();
 
-  // Totals
+  // Total
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  leftText('TOTAL:', y);
-  rightText(formatCurrency(sale.total), y);
-  y += 6;
-
-  drawLine(y);
-  y += 6;
+  doc.setFontSize(12);
+  left('TOTAL:');
+  right(formatCurrency(sale.total));
+  line();
 
   // Footer
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  centerText('Thank you for your purchase!', y, 8);
-  y += 4;
-  centerText('Visit us again', y, 8);
-  y += 6;
+  doc.setFontSize(9);
+  center('Thank you for shopping!', 9);
+  center('Visit again', 9);
+  y += 5;
+  center(`*** ${invNum} ***`, 7);
 
-  // Barcode placeholder (simple text)
-  doc.setFontSize(6);
-  centerText(`||||| ${invNum} |||||`, y, 6);
-
-  // Save the PDF
   doc.save(`Receipt_${invNum}.pdf`);
-  
   return invNum;
 };
 
-// Generate a more detailed invoice PDF
+// A4 Invoice
 export const generateInvoice = ({ sale, invoiceNumber }: ReceiptOptions) => {
-  const doc = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-  });
-
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageWidth = 210;
   const margin = 20;
   let y = 20;
 
   // Header
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(24);
+  doc.setFontSize(26);
   doc.text('BALTISTAN BOOK DEPOT', margin, y);
-  y += 8;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.text('Quality Books & Stationery Since 1985', margin, y);
-  y += 5;
-  doc.text('Main Bazaar, Skardu, Gilgit-Baltistan, Pakistan', margin, y);
-  y += 5;
-  doc.text('Phone: +92 XXX XXXXXXX | Email: info@baltistanbookdepot.pk', margin, y);
   y += 10;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+  doc.text('Quality Books & Stationery', margin, y);
+  y += 6;
+  doc.text('Main Bazaar, Skardu, Gilgit-Baltistan', margin, y);
+  y += 6;
+  doc.text('Phone: +92 3XX XXXXXXX', margin, y);
 
   // Invoice title
+  doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.text('INVOICE', pageWidth - margin - 40, 30);
+  doc.text('INVOICE', pageWidth - margin - 50, 35);
 
   // Invoice details box
-  y = 50;
-  doc.setFillColor(245, 245, 245);
-  doc.rect(pageWidth - margin - 70, y, 70, 30, 'F');
-  
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
   const invNum = invoiceNumber || `INV-${Date.now().toString().slice(-8)}`;
-  doc.text(`Invoice #: ${invNum}`, pageWidth - margin - 65, y + 8);
-  doc.text(`Date: ${formatDate(sale.date)}`, pageWidth - margin - 65, y + 16);
-  doc.text(`Payment: ${sale.paymentType.toUpperCase()}`, pageWidth - margin - 65, y + 24);
+  doc.setFillColor(240, 240, 240);
+  doc.rect(pageWidth - margin - 80, 45, 80, 35, 'F');
+  doc.setFontSize(10);
+  doc.text(`Invoice #: ${invNum}`, pageWidth - margin - 75, 55);
+  doc.text(`Date: ${formatDate(sale.date)}`, pageWidth - margin - 75, 63);
+  doc.text(`Payment: ${sale.paymentType.toUpperCase()}`, pageWidth - margin - 75, 71);
 
-  // Customer info (if credit sale)
-  if (sale.paymentType === 'credit' && sale.creditorId) {
-    const creditor = mockCreditors.find(c => c.id === sale.creditorId);
-    if (creditor) {
-      y = 55;
-      doc.setFont('helvetica', 'bold');
-      doc.text('Bill To:', margin, y);
-      y += 6;
-      doc.setFont('helvetica', 'normal');
-      doc.text(creditor.name, margin, y);
-      y += 5;
-      doc.text(creditor.phone, margin, y);
-    }
+  // Bill To
+  y = 90;
+  if (sale.paymentType === 'credit' && sale.creditorName) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Bill To:', margin, y);
+    y += 8;
+    doc.setFont('helvetica', 'normal');
+    doc.text(sale.creditorName, margin, y);
   }
 
-  // Items table
-  y = 95;
-  
-  // Table header
+  // Table
+  y = 110;
+  const headers = ['Description', 'Qty', 'Unit Price', 'Amount'];
+  const colX = [margin, 100, 140, 170];
+
   doc.setFillColor(55, 65, 81);
-  doc.rect(margin, y, pageWidth - (margin * 2), 10, 'F');
-  
-  doc.setTextColor(255, 255, 255);
+  doc.rect(margin, y, pageWidth - margin * 2, 10, 'F');
+  doc.setTextColor(255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.text('Item', margin + 5, y + 7);
-  doc.text('Qty', margin + 100, y + 7);
-  doc.text('Unit Price', margin + 120, y + 7);
-  doc.text('Total', margin + 150, y + 7);
-  
-  y += 10;
-  doc.setTextColor(0, 0, 0);
+  headers.forEach((h, i) => doc.text(h, colX[i], y + 7));
+
+  y += 15;
+  doc.setTextColor(0);
   doc.setFont('helvetica', 'normal');
 
-  // Table rows
-  sale.items.forEach((item, index) => {
-    if (index % 2 === 0) {
+  sale.items.forEach((item, i) => {
+    if (i % 2 === 0) {
       doc.setFillColor(249, 250, 251);
-      doc.rect(margin, y, pageWidth - (margin * 2), 10, 'F');
+      doc.rect(margin, y - 1, pageWidth - margin * 2, 10, 'F');
     }
-    
-    const nameLines = doc.splitTextToSize(item.productName, 90);
-    doc.text(nameLines[0], margin + 5, y + 7);
-    doc.text(String(item.quantity), margin + 100, y + 7);
-    doc.text(formatCurrency(item.unitPrice), margin + 120, y + 7);
-    doc.text(formatCurrency(item.total), margin + 150, y + 7);
-    
-    y += 10;
+    const lines = doc.splitTextToSize(item.productName, 90);
+    doc.text(lines, colX[0], y + 5);
+    doc.text(String(item.quantity), colX[1], y + 5);
+    doc.text(formatCurrency(item.unitPrice), colX[2], y + 5);
+    doc.text(formatCurrency(item.total), colX[3], y + 5);
+    y += Math.max(10, lines.length * 6);
   });
 
-  // Total section
-  y += 5;
-  doc.setDrawColor(200);
-  doc.line(margin + 100, y, pageWidth - margin, y);
-  y += 8;
-  
+  // Total
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.text('TOTAL:', margin + 120, y);
-  doc.text(formatCurrency(sale.total), margin + 150, y);
+  doc.setFontSize(14);
+  doc.text('TOTAL:', colX[2], y + 10);
+  doc.text(formatCurrency(sale.total), colX[3], y + 10);
 
   // Footer
-  y = 260;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFontSize(10);
   doc.setTextColor(100);
-  doc.text('Thank you for your business!', pageWidth / 2, y, { align: 'center' });
-  y += 5;
-  doc.text('Terms: Payment due within 30 days for credit purchases.', pageWidth / 2, y, { align: 'center' });
+  doc.text('Thank you for your business!', pageWidth / 2, 270, { align: 'center' });
 
-  // Save
   doc.save(`Invoice_${invNum}.pdf`);
-  
   return invNum;
 };

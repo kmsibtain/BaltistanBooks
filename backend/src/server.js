@@ -9,6 +9,11 @@ const creditorRoutes = require('./routes/creditors');
 const supplierRoutes = require('./routes/suppliers');
 const saleRoutes = require('./routes/sales');
 const dashboardRoutes = require('./routes/dashboard');
+const authRoutes = require('./routes/auth');
+const settingsRoutes = require('./routes/settings');
+const expenseRoutes = require('./routes/expenses');
+const reportRoutes = require('./routes/reports');
+const auditRoutes = require('./routes/audit');
 
 const { errorHandler } = require('./middleware/errorHandler');
 
@@ -20,7 +25,7 @@ app.use(morgan('dev'));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.json({ message: 'Baltistan Book Depot API is running! '});
+  res.json({ message: 'Baltistan Book Depot API is running! ' });
 });
 
 // Routes
@@ -29,6 +34,11 @@ app.use('/api/creditors', creditorRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/expenses', expenseRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/audit', auditRoutes);
 
 app.use(errorHandler);
 

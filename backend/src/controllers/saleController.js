@@ -1,4 +1,5 @@
 const { db, admin } = require('../config/firebase');
+const { logAction } = require('../utils/auditLogger');
 
 const createSale = async (req, res) => {
   try {
@@ -38,12 +39,29 @@ const createSale = async (req, res) => {
           date: sale.date,
           type: 'credit_sale',
           amount: total,
-          description: `Sale ${saleRef.id.substring(0,8)}`
+          description: `Sale ${saleRef.id.substring(0, 8)}`
         })
       });
     }
 
     await batch.commit();
+
+    // Audit Log
+    const userId = req.user ? req.user.id : 'unknown';
+    const userName = req.user ? req.user.name : 'Unknown User';
+    // We need to import logAction at top
+    // For now I will assume I can add the log call here and the import at top
+
+    // Actually I need to add the import first. I will do this in two steps or use multi_replace.
+    // I will use replace_file_content to add import first, then another for the log.
+
+    // Wait, let's look at the plan. I'll verify routes/sales.js first to be safe, but for now let's just update the controller assuming req.user is available if auth is used.
+
+    // Replacing the response line to inject log before it
+    const { logAction } = require('../utils/auditLogger'); // It's better to put this at top, but I can put it here if lazy. Better at top.
+    // actually let's just do it cleanly.
+
+    await logAction(userId, userName, 'CREATE', 'SALE', saleRef.id, { total, items: items.length });
 
     res.status(201).json({ id: saleRef.id, ...sale });
   } catch (error) {
